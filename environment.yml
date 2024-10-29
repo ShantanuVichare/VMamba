@@ -1,0 +1,34 @@
+name: vmamba
+
+channels:
+  - nvidia/label/cuda-12.4.1
+  - pytorch
+  - nvidia
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - pip
+  - cuda
+  - pytorch=2.4.1
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.4
+  - scikit-learn
+  - pip:
+      - ipykernel
+      - matplotlib
+      - nibabel
+      - torchinfo
+      - mamba-ssm
+      - causal-conv1d>=1.4.0
+  # - nvidia/label/cuda-12.1.0::cuda
+  # - nvidia/label/cuda-12.1.0::cuda-nvcc
+  # - conda-forge::gxx_linux-64=12.2
+  # - conda-forge::cudnn
+# ENV vars
+# export TMPDIR='/var/tmp'
+# export CUDA_HOME=$CONDA_PREFIX
+# export CUDA_CUDART_LIBRARY=$CONDA_PREFIX/lib/libcudart.so
+# export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
