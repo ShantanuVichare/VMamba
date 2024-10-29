@@ -162,6 +162,7 @@ device = torch.device("cuda")
 
 # Dataset and DataLoader
 dataset = TumorMRIDataset(root_dir, limit=data_limit)
+nChannels, *imgSize = dataset[0][0].shape
 train_samples, test_samples, distribution_info = split_dataset_by_class(dataset)
 print(f"Train samples: {len(train_samples)}, Test samples: {len(test_samples)}, Distributions: {distribution_info}")
 
@@ -176,9 +177,9 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 # Model, Loss, Optimizer, and Scheduler
 model_class = lambda: VisionMamba3D(
-    img_size=(155, 240, 240),
+    img_size=imgSize,
     patch_size=(5, 4, 4),
-    in_chans=1, num_classes=2,
+    in_chans=nChannels, num_classes=2,
     depths=[4, 4, 4, 4],
     dims=[96, 192, 288, 384],
     debug=False,

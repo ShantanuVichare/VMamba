@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split, KFold
 class TumorMRIDataset(Dataset):
     def __init__(self, root_dir, limit=None):
         self.root_dir = root_dir
+        self.modalities = ['t1ce', 't1', 't2', 'flair', 'seg']
         self.samples = self._load_samples(root_dir, limit)
 
     def _load_samples(self, root_dir, limit=None):
@@ -18,14 +19,11 @@ class TumorMRIDataset(Dataset):
             label_specific_sample_count = 0
             folder_path = os.path.join(root_dir, label)
             for patient_folder in os.listdir(folder_path):
-                # Find any file that ends with 't1ce.nii'
-                for file_name in os.listdir(os.path.join(folder_path, patient_folder)):
-                    if file_name.endswith('t1ce.nii'):
-                        img_path = os.path.join(folder_path, patient_folder, file_name)
-                        samples.append((img_path, 0 if label == 'HGG' else 1))
-                        label_specific_sample_count += 1
-                        if limit is not None and label_specific_sample_count >= limit:
-                            break
+                file_paths = [None] * len(self.modalities)
+                for i, modality in enumerate(self.modalities):
+                    file_paths[i] = os.path.join(folder_path, patient_folder, f'{patient_folder}_{modality}.nii')
+                samples.append((file_paths, 0 if label == 'HGG' else 1))
+                label_specific_sample_count += len(file_paths)
                 if limit is not None and label_specific_sample_count >= limit:
                     break
         return samples
@@ -34,10 +32,13 @@ class TumorMRIDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        file_path, label = self.samples[idx]
-        img = nib.load(file_path).get_fdata()
-        img = self._pad_or_crop(img)
-        return torch.tensor(img, dtype=torch.float32).permute(2,0,1).unsqueeze(0), torch.tensor(label, dtype=torch.long)
+        file_paths, label = self.samples[idx]
+        tensor_list = []
+        for file_path in file_paths:
+            img = nib.load(file_path).get_fdata()
+            img = self._pad_or_crop(img)
+            tensor_list.append(torch.tensor(img, dtype=torch.float32).permute(2,0,1))
+        return torch.stack(tensor_list), torch.tensor(label, dtype=torch.long)
 
     def _pad_or_crop(self, img):
         target_shape = img.shape
