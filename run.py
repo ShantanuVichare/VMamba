@@ -151,7 +151,8 @@ def getTime():
 startTime = getTime()
 
 # Paths and configurations
-root_dir = './data/MICCAI_BraTS_2019_Data_Training/'  # Change to your dataset path
+root_dir = os.getenv('DATASET_PATH', './data/MICCAI_BraTS_2019_Data_Training/')
+
 batch_size = 4
 initial_lr = 1e-4  # Lowered learning rate to prevent NaN
 num_epochs = 50
@@ -177,7 +178,7 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 # Model, Loss, Optimizer, and Scheduler
 model_class = lambda: VisionMamba3D(
-    img_size=imgSize,
+    img_size=imgSize, # (155, 240, 240)
     patch_size=(5, 4, 4),
     in_chans=nChannels, num_classes=2,
     depths=[4, 4, 4, 4],
@@ -196,8 +197,8 @@ model = model_class().to(device)
 optimizer = optimizer_class(model.parameters())
 scheduler = scheduler_class(optimizer)
 
-# print('Model Summary')
-# print(summary(model, input_size=(batch_size, 1, 155, 240, 240)))
+print('Model Summary')
+print(summary(model, input_size=(batch_size, 1, *imgSize)))
 # sys.exit()
 
 # Initialize GradScaler for full training

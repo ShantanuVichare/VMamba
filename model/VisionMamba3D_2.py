@@ -1,25 +1,25 @@
 import torch
 import torch.nn as nn
-# from mamba_ssm import Mamba2
+from mamba_ssm import Mamba
 # from model.modules.ssm import SSM
 
 # Patch Embedding for 3D input
-class PatchEmbedding3D(nn.Module):
-    def __init__(self, img_size, patch_size, in_chans, embed_dim):
-        super(PatchEmbedding3D, self).__init__()
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.in_chans = in_chans
-        self.embed_dim = embed_dim
-        self.num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1]) * (img_size[2] // patch_size[2])
+# class PatchEmbedding3D(nn.Module):
+#     def __init__(self, img_size, patch_size, in_chans, embed_dim):
+#         super(PatchEmbedding3D, self).__init__()
+#         self.img_size = img_size
+#         self.patch_size = patch_size
+#         self.in_chans = in_chans
+#         self.embed_dim = embed_dim
+#         self.num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1]) * (img_size[2] // patch_size[2])
         
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+#         self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         
-    def forward(self, x):
-        x = self.proj(x)  # Projected patches [B, embed_dim, D', H', W']
-        x = x.flatten(2)  # Flattened patches [B, embed_dim, num_patches]
-        x = x.permute(0, 2, 1)  # [B, num_patches, embed_dim]
-        return x
+#     def forward(self, x):
+#         x = self.proj(x)  # Projected patches [B, embed_dim, D', H', W']
+#         x = x.flatten(2)  # Flattened patches [B, embed_dim, num_patches]
+#         x = x.permute(0, 2, 1)  # [B, num_patches, embed_dim]
+#         return x
 
 # Custom Transformer Block with State Space Model (SSM) layer
 class TransformerBlockWithSSM(nn.Module):
@@ -29,61 +29,61 @@ class TransformerBlockWithSSM(nn.Module):
             hidden_dim = embed_dim * 4
         # self.attn = nn.MultiheadAttention(embed_dim, num_heads)
         # self.norm1 = nn.LayerNorm(embed_dim)
-        self.ssm_layer = StateSpaceModelLayer(embed_dim)
-        # self.mamba_layer = MambaLayer(embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim)
+        # self.ssm_layer = StateSpaceModelLayer(embed_dim)
+        self.mamba_layer = MambaLayer(embed_dim)
+        self.norm = nn.LayerNorm(embed_dim)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, embed_dim),
         )
         
-    def forward(self, x):
-        # x.shape = [B, D'*H'*W', embed_dim]
-        
+    def forward(self, x):        
         # Self-attention
         # attn_output, _ = self.attn(x, x, x)
         # x = self.norm1(x + attn_output)
         
         # State Space Model Layer
-        ssm_output = self.ssm_layer(x)
-        x = self.norm2(x + ssm_output)
+        # ssm_output = self.ssm_layer(x)
+        # x = self.norm2(x + ssm_output)
         
         # Mamba Layer
-        # mamba_output = self.mamba_layer(x)
-        # x = self.norm2(x + mamba_output)
+        mamba_output = self.mamba_layer(x)
+        x = self.norm(x + mamba_output)
         
         # Feedforward
         x = self.mlp(x)
         return x
 
 # Custom State Space Model (SSM) Layer
-class StateSpaceModelLayer(nn.Module):
-    def __init__(self, embed_dim, hidden_dim=None):
-        super(StateSpaceModelLayer, self).__init__()
-        if hidden_dim is None:
-            hidden_dim = embed_dim * 2
-        # basic SSM layer for now
-        self.B = nn.Parameter(torch.zeros(embed_dim, hidden_dim))
-        self.C = nn.Parameter(torch.zeros(hidden_dim, embed_dim))
-        nn.init.xavier_normal_(self.B)
-        nn.init.xavier_normal_(self.C)
-        # self.ssm = SSM(dim, dt_rank, dim_inner, d_state)
+# class StateSpaceModelLayer(nn.Module):
+#     def __init__(self, embed_dim, hidden_dim=None):
+#         super(StateSpaceModelLayer, self).__init__()
+#         if hidden_dim is None:
+#             hidden_dim = embed_dim * 2
+#         # basic SSM layer for now
+#         self.B = nn.Parameter(torch.zeros(embed_dim, hidden_dim))
+#         self.C = nn.Parameter(torch.zeros(hidden_dim, embed_dim))
+#         nn.init.xavier_normal_(self.B)
+#         nn.init.xavier_normal_(self.C)
+#         # self.ssm = SSM(dim, dt_rank, dim_inner, d_state)
         
-    def forward(self, x):
-        # This is a simplified SSM; you can expand it for more complex SSM architectures
+#     def forward(self, x):
+#         # This is a simplified SSM; you can expand it for more complex SSM architectures
         
-        h = torch.matmul(x, self.B)
-        y = torch.matmul(h, self.C)
-        return y
+#         h = torch.matmul(x, self.B)
+#         y = torch.matmul(h, self.C)
+#         return y
     
 class MambaLayer(nn.Module):
     def __init__(self, embed_dim):
         super(MambaLayer, self).__init__()
-        self.mamba = Mamba2(
+        self.mamba = Mamba(
             # This module uses roughly 3 * expand * d_model^2 parameters
             d_model=embed_dim, # Model dimension d_model
             d_state=64,  # SSM state expansion factor, typically 64 or 128
+            # headdim=4,  # Attention head dimension
+            # d_model * expand / headdim = multiple of 8
             d_conv=4,    # Local convolution width
             expand=2,    # Block expansion factor
         )
