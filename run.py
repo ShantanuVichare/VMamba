@@ -17,9 +17,8 @@ from torch import autocast, GradScaler
 from torchinfo import summary
 
 from utils.dataset import TumorMRIDataset, split_dataset_by_class
-# from model.VisionMamba3D import VisionMamba3D
 
-from model.VisionMamba3D_2 import VisionMamba3D
+from model.VisionMamba3D import VisionMamba3D
 # Training function with mixed precision
 def train_model(train_loader, model, criterion, optimizer, scheduler, device, scaler=None):
     model.train()

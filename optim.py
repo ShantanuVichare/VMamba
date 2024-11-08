@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 
 from utils.dataset import TumorMRIDataset, split_dataset_by_class
-from model.VisionMamba3D_2 import VisionMamba3D
+from model.VisionMamba3D import VisionMamba3D
 
 class EarlyStopping:
     def __init__(self, patience=7, min_delta=0):
