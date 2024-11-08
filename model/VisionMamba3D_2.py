@@ -23,19 +23,31 @@ from mamba_ssm import Mamba
 
 # Custom Transformer Block with State Space Model (SSM) layer
 class TransformerBlockWithSSM(nn.Module):
-    def __init__(self, embed_dim, hidden_dim=None, num_heads=None):
+    def __init__(self, embed_dim, hidden_dim=None, num_heads=None, mlp_ratio=4.0, dropout=0.5):
         super(TransformerBlockWithSSM, self).__init__()
         if hidden_dim is None:
-            hidden_dim = embed_dim * 4
+            hidden_dim = int(embed_dim * mlp_ratio)
+        # self.norm = nn.LayerNorm(embed_dim)
+        
+        # Define 6 Layer Normalization layers
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.norm3 = nn.LayerNorm(embed_dim)
+        self.norm4 = nn.LayerNorm(embed_dim)
+        self.norm5 = nn.LayerNorm(embed_dim)
+        self.norm6 = nn.LayerNorm(embed_dim)
+        
         # self.attn = nn.MultiheadAttention(embed_dim, num_heads)
         # self.norm1 = nn.LayerNorm(embed_dim)
         # self.ssm_layer = StateSpaceModelLayer(embed_dim)
         self.mamba_layer = MambaLayer(embed_dim)
-        self.norm = nn.LayerNorm(embed_dim)
+        
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(dropout),  # Dropout after GELU
             nn.Linear(hidden_dim, embed_dim),
+            nn.Dropout(dropout)  # Dropout after second Linear layer
         )
         
     def forward(self, x):        
@@ -47,12 +59,25 @@ class TransformerBlockWithSSM(nn.Module):
         # ssm_output = self.ssm_layer(x)
         # x = self.norm2(x + ssm_output)
         
-        # Mamba Layer
-        mamba_output = self.mamba_layer(x)
-        x = self.norm(x + mamba_output)
+        # # Mamba Layer
+        # mamba_output = self.mamba_layer(x)
+        # x = self.norm(x + mamba_output)
         
-        # Feedforward
-        x = self.mlp(x)
+        # # Feedforward
+        # x = self.mlp(x)
+        
+        
+        # Layer Normalization and Self-Attention with Residual Connection
+        x = x + self.mamba_layer(self.norm1(x))
+
+        # Further normalization before the MLP block
+        x = self.norm4(x)
+
+        # MLP block with residual connection
+        x = x + self.mlp(self.norm5(x))
+
+        # Final normalization before output
+        x = self.norm6(x)
         return x
 
 # Custom State Space Model (SSM) Layer
@@ -88,16 +113,16 @@ class MambaLayer(nn.Module):
             expand=2,    # Block expansion factor
         )
     def forward(self, x):
-        print("Mamba x shape:", x.shape)
         return self.mamba(x)
 
 # Vision Mamba Model
 class VisionMamba3D(nn.Module):
     def __init__(self,
-                 img_size, patch_size,
-                 in_chans, num_classes,
-                 depths=[4, 6, 4, 6],
-                 dims=[96, 192, 384, 576],
+                 img_size=(155, 240, 240), patch_size=(5, 8, 8),
+                 in_chans=1, num_classes=2,
+                 depths=[2, 2, 6, 2],
+                 dims=[96, 192, 384, 768],
+                 mlp_ratio=4.0, dropout=0.5,
                  debug=False
                  ):
         super(VisionMamba3D, self).__init__()
@@ -110,7 +135,11 @@ class VisionMamba3D(nn.Module):
         
         self.transformer_layers = nn.ModuleList([
             nn.Sequential(*[
-                TransformerBlockWithSSM(embed_dim=dims[i_layer])
+                TransformerBlockWithSSM(
+                    embed_dim=dims[i_layer],
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout
+                )
                 for _ in range(depths[i_layer]) ])
             for i_layer in range(self.num_stages)
         ])
@@ -124,9 +153,9 @@ class VisionMamba3D(nn.Module):
         
         # Classification head
         self.fc = nn.Sequential(
-            nn.LayerNorm(dims[-1]),
             nn.Linear(dims[-1], 512),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(512, num_classes)
         )
     

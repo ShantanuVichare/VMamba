@@ -1,6 +1,9 @@
 import os
 import sys
+import json
 import datetime
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,7 +21,7 @@ from utils.dataset import TumorMRIDataset, split_dataset_by_class
 
 from model.VisionMamba3D_2 import VisionMamba3D
 # Training function with mixed precision
-def train_model(train_loader, model, criterion, optimizer, scheduler, device, scaler):
+def train_model(train_loader, model, criterion, optimizer, scheduler, device, scaler=None):
     model.train()
     running_loss = 0.0
     for images, labels in train_loader:
@@ -27,23 +30,24 @@ def train_model(train_loader, model, criterion, optimizer, scheduler, device, sc
         optimizer.zero_grad()
 
         # Use autocast for mixed precision
-        with autocast(device.type):
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-        # outputs = model(images)
-        # loss = criterion(outputs, labels)
+        # with autocast(device.type):
+        #     outputs = model(images)
+        #     loss = criterion(outputs, labels)
+        outputs = model(images)
+        loss = criterion(outputs, labels)
 
-        # Scale the loss before backward pass
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        # loss.backward()
-        # optimizer.step()
+        if scaler is None:
+            loss.backward()
+            optimizer.step()
+        else:
+            # Scale the loss before backward pass
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
-        # Now step the scheduler after optimizer step
-        scheduler.step()
         running_loss += loss.item()
-        break # TODO: Remove this line to train on the entire dataset
+    # Now step the scheduler after optimizer step
+    scheduler.step()
     return running_loss / len(train_loader)
 
 
@@ -69,7 +73,7 @@ def test_model(test_loader, model, criterion, device, evaluate=False):
         f1 = f1_score(true_labels, pred_labels)
         auc = roc_auc_score(true_labels, pred_labels)
         auc_pr = average_precision_score(true_labels, pred_labels)
-        results.append((acc, cm, f1, auc, auc_pr))
+        results.append((acc, cm.tolist(), f1, auc, auc_pr))
     return results
 
 
@@ -93,14 +97,15 @@ def cross_validate(train_loader, model_class, criterion, optimizer_class, schedu
         scheduler = scheduler_class(optimizer)
 
         # Initialize GradScaler for mixed precision training
-        scaler = GradScaler()
+        # scaler = GradScaler()
+        scaler = None
 
         # Train and evaluate on each fold
         for epoch in range(num_epochs):
             train_loss = train_model(train_loader_fold, model, criterion, optimizer, scheduler, device, scaler)
             print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}')
 
-        val_acc, _, val_f1, val_auc, val_auc_pr = evaluate_model(val_loader_fold, model, criterion, device)
+        _1, _2, (val_acc, _, val_f1, val_auc, val_auc_pr) = test_model(val_loader_fold, model, criterion, device, evaluate=True)
         fold_results.append((val_acc, val_f1, val_auc, val_auc_pr))
 
     # Return average metrics across folds
@@ -113,8 +118,9 @@ def cross_validate(train_loader, model_class, criterion, optimizer_class, schedu
 
 
 # Results saving function
-def save_results_to_file(file_path, test_acc, test_cm, test_f1, test_auc, test_auc_pr, extra_info:str=None):
+def save_results_to_file(file_path, epoch_count, test_acc, test_cm, test_f1, test_auc, test_auc_pr, extra_info:str=None):
     with open(file_path+'.log', 'w') as f:
+        f.write(f"Epochs: {epoch_count}\n")
         f.write(f"Test Accuracy: {test_acc:.4f}\n")
         f.write(f"Test Confusion Matrix:\n{test_cm}\n")
         f.write(f"Test F1 Score: {test_f1:.4f}\n")
@@ -125,7 +131,6 @@ def save_results_to_file(file_path, test_acc, test_cm, test_f1, test_auc, test_a
     print('Results saved to file')
 
 def save_loss_plots_to_file(file_path, train_losses, test_losses):
-    import matplotlib.pyplot as plt
     plt.figure()
     plt.plot(train_losses, label='Train Loss')
     plt.plot(test_losses, label='Test Loss')
@@ -134,11 +139,9 @@ def save_loss_plots_to_file(file_path, train_losses, test_losses):
     plt.legend()
     plt.savefig(file_path+'.png')
     
-    # Save losses to file
-    torch.save({
-        'train_losses': train_losses,
-        'test_losses': test_losses
-    }, file_path+'.pt')
+    # Save losses to json file
+    with open(file_path+'.json', 'w') as f:
+        json.dump({'train_losses': train_losses, 'test_losses': test_losses}, f)
     print('Losses plots and values saved')
     
 def save_model_to_file(file_path, model):
@@ -153,21 +156,20 @@ startTime = getTime()
 # Paths and configurations
 root_dir = os.getenv('DATASET_PATH', './data/MICCAI_BraTS_2019_Data_Training/')
 
-batch_size = 4
-initial_lr = 1e-4  # Lowered learning rate to prevent NaN
-num_epochs = 50
-data_limit = 1000
+batch_size = 8
+initial_lr = 1e-5
+num_epochs = 100
+data_limit = None # 1000
 weight_decay = 1e-3
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cuda")
+print('Parameters:', batch_size, initial_lr, num_epochs, data_limit, weight_decay, device)
 
 # Dataset and DataLoader
 dataset = TumorMRIDataset(root_dir, limit=data_limit)
 nChannels, *imgSize = dataset[0][0].shape
-train_samples, test_samples, distribution_info = split_dataset_by_class(dataset)
+train_samples, test_samples, distribution_info = split_dataset_by_class(dataset, train_ratio=0.8)
 print(f"Train samples: {len(train_samples)}, Test samples: {len(test_samples)}, Distributions: {distribution_info}")
-
-# sys.exit()
 
 # Create datasets and loaders for train and test sets
 train_dataset = torch.utils.data.Subset(dataset, [dataset.samples.index(s) for s in train_samples])
@@ -176,18 +178,20 @@ test_dataset = torch.utils.data.Subset(dataset, [dataset.samples.index(s) for s 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
+# sys.exit()
+
 # Model, Loss, Optimizer, and Scheduler
 model_class = lambda: VisionMamba3D(
     img_size=imgSize, # (155, 240, 240)
-    patch_size=(5, 4, 4),
+    patch_size=(5, 8, 8),
     in_chans=nChannels, num_classes=2,
-    depths=[4, 4, 4, 4],
-    dims=[96, 192, 288, 384],
+    depths=[2, 2, 6, 2],
+    dims=[96, 192, 384, 768],
     debug=False,
     )
 criterion = nn.CrossEntropyLoss()
 optimizer_class = lambda params: optim.AdamW(params, lr=initial_lr, weight_decay=weight_decay)
-scheduler_class = lambda opt: StepLR(opt, step_size=10, gamma=0.75)
+scheduler_class = lambda opt: StepLR(opt, step_size=2, gamma=0.5)
 
 # Perform cross-validation
 # cv_acc, cv_f1, cv_auc, cv_auc_pr = cross_validate(train_loader, model_class, criterion, optimizer_class, scheduler_class, device, num_epochs=num_epochs, k_folds=5)
@@ -198,15 +202,19 @@ optimizer = optimizer_class(model.parameters())
 scheduler = scheduler_class(optimizer)
 
 print('Model Summary')
-print(summary(model, input_size=(batch_size, 1, *imgSize)))
+summary(model, input_size=(batch_size, nChannels, *imgSize), depth=5)
 # sys.exit()
 
 # Initialize GradScaler for full training
-scaler = GradScaler()
+# scaler = GradScaler()
+scaler = None
 
 # Train model on the entire training set
 # with torch.autograd.detect_anomaly(): # For debugging NaNs
 train_losses, test_losses = [], []
+print('Training started at:', startTime)
+# Create results directory if it doesn't exist
+os.makedirs(f'results', exist_ok=True)
 try:
     for epoch in range(num_epochs):
         train_loss = train_model(train_loader, model, criterion, optimizer, scheduler, device, scaler)
@@ -215,18 +223,18 @@ try:
         print('Test Evaluation:\n', 'Accuracy:', evals[0], 'CM:', evals[1], 'F1:', evals[2], 'AUC:', evals[3], 'AUC-PR:', evals[4])
         train_losses.append(train_loss)
         test_losses.append(test_loss)
+
+        # Overwrite results to file after each epoch
+        # Save plots of training and test losses to disk 
+        save_loss_plots_to_file(f'results/{startTime}-losses', train_losses, test_losses)
+        # Save test results to file
+        save_results_to_file(f'results/{startTime}-results', epoch+1, *evals)
+
 except Exception as e:
     print('Error occured:', e)
 finally:
-    endTime = getTime()
-    print('Training finished at:', endTime)
-
-# Save plots of training and test losses to disk
-save_loss_plots_to_file(f'results/{endTime}-losses', train_losses, test_losses)
-
-# Save test results to file
-save_results_to_file(f'results/{endTime}-results', *evals)
+    print('Training finished at:', getTime())
 
 # Save model to disk
-save_model_to_file(f'results/{endTime}-model', model)
+save_model_to_file(f'results/{startTime}-model', model)
 
