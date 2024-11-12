@@ -8,9 +8,9 @@ from sklearn.model_selection import train_test_split, KFold
 
 # Dataset for 3D MRI images
 class TumorMRIDataset(Dataset):
-    def __init__(self, root_dir, limit=None):
+    def __init__(self, root_dir, modalities = ['t1ce', 't1', 't2', 'flair'], limit=None):
         self.root_dir = root_dir
-        self.modalities = ['t1ce', 't1', 't2', 'flair', 'seg']
+        self.modalities = modalities
         self.samples = self._load_samples(root_dir, limit)
 
     def _load_samples(self, root_dir, limit=None):
@@ -61,6 +61,11 @@ def split_dataset_by_class(dataset, train_ratio=0.8):
     # Combine the train and test samples
     train_samples = HGG_train + LGG_train
     test_samples = HGG_test + LGG_test
-    distribution_info = {'HGG_train': len(HGG_train), 'HGG_test': len(HGG_test), 'LGG_train': len(LGG_train), 'LGG_test': len(LGG_test)}
+    distribution_info = {
+        'HGG_train': len(HGG_train),
+        'HGG_test': len(HGG_test),
+        'LGG_train': len(LGG_train),
+        'LGG_test': len(LGG_test),
+    }
 
     return train_samples, test_samples, distribution_info
