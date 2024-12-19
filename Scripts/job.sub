@@ -1,0 +1,38 @@
+# CHTC Submit File
+
+universe = vanilla
+
+#chtc_want_el8 = true
+
+#batch_name = BFM Exp
+
+RUN_ID = $ENV(NOW)_$(Cluster)
+
+executable = RunExperiment.sh
+arguments = $(RUN_ID)
+log = execution_logs/$(RUN_ID).log
+output = execution_logs/$(RUN_ID).out
+error = execution_logs/$(RUN_ID).err
+stream_output = true
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT_OR_EVICT
+
+Requirements = (Target.HasCHTCStaging == true)
+
+# transfer_input_files = /home/vichare2/Scripts/
+transfer_input_files = code/
+transfer_output_files = results
+
+# GPU request
+#request_gpus = 1
+#+GPUJobLength = "short"
+#+WantGPULab = true
+#require_gpus = (Capability >= 8.0) && (GlobalMemoryMb >= 8192)
+
+# CPU, RAM and Disk Request
+request_cpus = 2
+request_memory = 16GB
+request_disk = 64GB
+
+queue 1

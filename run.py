@@ -1,12 +1,15 @@
 import os
+import time
 import sys
 import json
 import datetime
+from traceback import print_exception
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 import torch
 import torch.nn as nn
-import numpy as np
 from torch.utils.data import DataLoader, Dataset, Subset
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR, ConstantLR, SequentialLR
@@ -19,7 +22,55 @@ from torchinfo import summary
 from utils.dataset import TumorMRIDataset, split_dataset_by_class
 
 from model.VisionMamba3D import VisionMamba3D
-# Training function with mixed precision
+
+
+def train_model_with_timing(train_loader, model, criterion, optimizer, scheduler, device, scaler=None):
+    model.train()
+    running_loss = 0.0
+    timer_order = [
+        'reset',
+        'data_load',
+        'data_transfer',
+        'zero_grad',
+        'forward',
+        'loss',
+        'backward',
+    ]
+    timer_points = [time.perf_counter()]
+    for images, labels in train_loader:
+        timer_points.append(time.perf_counter())
+        images, labels = images.to(device), labels.to(device)
+        timer_points.append(time.perf_counter())      
+        
+        optimizer.zero_grad()
+        timer_points.append(time.perf_counter())
+
+        # Use autocast for mixed precision
+        # with autocast(device.type):
+        #     outputs = model(images)
+        #     loss = criterion(outputs, labels)
+        outputs = model(images)
+        timer_points.append(time.perf_counter())
+        loss = criterion(outputs, labels)
+        timer_points.append(time.perf_counter())
+
+        if scaler is None:
+            loss.backward()
+            optimizer.step()
+        else:
+            # Scale the loss before backward pass
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        timer_points.append(time.perf_counter())
+
+        running_loss += loss.item()
+        timer_points.append(time.perf_counter())
+    # Now step the scheduler after optimizer step
+    scheduler.step()
+    return running_loss / len(train_loader), timer_points
+
+# Training function
 def train_model(train_loader, model, criterion, optimizer, scheduler, device, scaler=None):
     model.train()
     running_loss = 0.0
@@ -127,7 +178,6 @@ def save_results_to_file(file_path, epoch_count, test_acc, test_cm, test_f1, tes
         f.write(f"Test AUC-PR: {test_auc_pr:.4f}\n")
         if extra_info:
             f.write(extra_info+'\n')
-    print('Results saved to file')
 
 def save_loss_plots_to_file(file_path, train_losses, test_losses):
     plt.figure()
@@ -142,7 +192,6 @@ def save_loss_plots_to_file(file_path, train_losses, test_losses):
     # Save losses to json file
     with open(file_path+'.json', 'w') as f:
         json.dump({'train_losses': train_losses, 'test_losses': test_losses}, f)
-    print('Losses plots and values saved')
 
 def save_lr_plot_to_file(file_path, lr_values):
     plt.figure()
@@ -151,7 +200,6 @@ def save_lr_plot_to_file(file_path, lr_values):
     plt.ylabel('Learning Rate')
     plt.savefig(file_path+'.png')
     plt.clf()
-    print('Learning rate plot saved')
 
 def save_model_to_file(file_path, model):
     torch.save(model.state_dict(), file_path+'.pth')
@@ -173,7 +221,7 @@ weight_decay = 1e-3
 modalities = ['t1ce', 't1', 't2', 'flair']
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cuda")
-print('Parameters:', batch_size, initial_lr, num_epochs, data_limit, weight_decay, device)
+print('Parameters:', batch_size, initial_lr, num_epochs, data_limit, weight_decay, modalities, device)
 
 # Dataset and DataLoader
 dataset = TumorMRIDataset(root_dir, modalities=modalities, limit=data_limit)
@@ -259,9 +307,11 @@ try:
         save_loss_plots_to_file(f'{results_prefix}-losses', train_losses, test_losses)
         # Save test results to file
         save_results_to_file(f'{results_prefix}-results', epoch+1, *evals)
+        print('Training Epoch results saved to file')
 
 except Exception as e:
     print('Error occured:', e)
+    print_exception(e)
 finally:
     print('Training lasted from', startTime, 'to', getTime())
 

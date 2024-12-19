@@ -22,6 +22,7 @@ dependencies:
       - torchinfo
       - mamba-ssm
       - causal-conv1d>=1.4.0
+      - optuna
   # - nvidia/label/cuda-12.1.0::cuda
   # - nvidia/label/cuda-12.1.0::cuda-nvcc
   # - conda-forge::gxx_linux-64=12.2

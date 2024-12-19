@@ -8,10 +8,12 @@ from sklearn.model_selection import train_test_split, KFold
 
 # Dataset for 3D MRI images
 class TumorMRIDataset(Dataset):
-    def __init__(self, root_dir, modalities = ['t1ce', 't1', 't2', 'flair'], limit=None):
+    def __init__(self, root_dir, mode='nib', modalities = ['t1ce', 't1', 't2', 'flair'], limit=None, target_shape=None):
+        self.mode = mode
         self.root_dir = root_dir
         self.modalities = modalities
         self.samples = self._load_samples(root_dir, limit)
+        self.target_shape = target_shape
 
     def _load_samples(self, root_dir, limit=None):
         samples = []
@@ -32,6 +34,20 @@ class TumorMRIDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
+        if self.mode == 'nib':
+            return self.get_nib(idx)
+        elif self.mode == 'pt':
+            return self.get_pt(idx)
+        else:
+            raise ValueError('Invalid mode')
+        
+    def get_pt(self, idx):
+        pre = 1 if idx>258 else 0
+        # print(pre, idx)
+        file_path = f'./test/pt_export/{pre}_{idx}.pt'
+        return torch.load(file_path), torch.tensor(pre, dtype=torch.long)
+        
+    def get_nib(self, idx):
         file_paths, label = self.samples[idx]
         tensor_list = []
         for file_path in file_paths:
@@ -41,7 +57,7 @@ class TumorMRIDataset(Dataset):
         return torch.stack(tensor_list), torch.tensor(label, dtype=torch.long)
 
     def _pad_or_crop(self, img):
-        target_shape = img.shape
+        target_shape = self.target_shape if self.target_shape else img.shape
         pad_size = [(max(0, target - img_dim)) for target, img_dim in zip(target_shape, img.shape)]
         pad_widths = [(p // 2, p - p // 2) for p in pad_size]
         img_padded = np.pad(img, pad_widths, mode='constant', constant_values=0)
